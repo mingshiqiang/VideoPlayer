@@ -78,7 +78,7 @@ VideoPlayer/
 
 ### 1. 环境准备
 
-- 安装 Qt 6.5 或更高版本（推荐通过 [Qt Online Installer](https://www.qt.io/download-qt-installer) 安装）。
+- 安装 Qt 6.8.3 或更高版本（推荐通过 [Qt Online Installer](https://www.qt.io/download-qt-installer) 安装）。
 - 安装 CMake（3.19+）。
 - 确保 Qt 的 `bin` 目录已加入系统 `PATH`，或在 IDE 中配置好 Qt 工具链。
 
@@ -106,6 +106,9 @@ cmake --build . --config Release
 # 例如
 ./Release/VideoPlayer.exe
 ```
+
+### 4.依赖库提取
+windeployqt --release build\Release\YourApp.exe
 
 ---
 
