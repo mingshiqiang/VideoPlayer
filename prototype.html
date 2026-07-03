@@ -1,0 +1,519 @@
+<meta charset="UTF-8">
+<style>
+  :root {
+    --bg-deep: #0a0a0c;
+    --bg-panel: rgba(20, 20, 24, 0.88);
+    --bg-hover: rgba(255, 255, 255, 0.08);
+    --bg-active: rgba(255, 255, 255, 0.14);
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.70);
+    --text-muted: rgba(255, 255, 255, 0.45);
+    --accent: #7c3aed;
+    --accent-light: #a78bfa;
+    --success: #22c55e;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Inter, "SF Pro Display", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    background: #f0f0f2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 20px;
+    color: var(--text-primary);
+  }
+  .device {
+    width: 1100px;
+    height: 680px;
+    background: var(--bg-deep);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    position: relative;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.28);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .title-bar {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 10;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.35), transparent);
+    -webkit-app-region: drag;
+  }
+  .title-left, .title-right { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 22px; height: 22px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo svg { width: 14px; height: 14px; }
+  .title-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+  }
+  .win-btn {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+  }
+  .win-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .win-btn.close:hover { background: #ef4444; color: #fff; }
+  .video-canvas {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: radial-gradient(circle at center, #15151a 0%, #0a0a0c 100%);
+  }
+  .big-play {
+    width: 88px; height: 88px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.10);
+    backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .big-play:hover { transform: scale(1.06); background: rgba(124,58,237,0.25); }
+  .big-play svg { width: 36px; height: 36px; margin-left: 4px; }
+  .control-bar {
+    height: 72px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 0 18px 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .seek-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 6px;
+  }
+  .time-code {
+    font-family: "JetBrains Mono", "SF Mono", monospace;
+    font-size: 12px;
+    color: var(--text-secondary);
+    min-width: 42px;
+    text-align: center;
+  }
+  .seek-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 2px;
+    position: relative;
+    cursor: pointer;
+    transition: height 0.15s ease;
+  }
+  .seek-track:hover { height: 8px; border-radius: 4px; }
+  .seek-buffered {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 62%;
+    background: rgba(255,255,255,0.28);
+    border-radius: inherit;
+  }
+  .seek-played {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 38%;
+    background: var(--accent);
+    border-radius: inherit;
+  }
+  .seek-thumb {
+    position: absolute;
+    left: 38%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 12px; height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .seek-track:hover .seek-thumb { opacity: 1; }
+  .controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .controls-left, .controls-center, .controls-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ctrl-btn {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+  }
+  .ctrl-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .ctrl-btn.play { width: 44px; height: 44px; color: var(--text-primary); }
+  .ctrl-btn.play:hover { background: var(--bg-hover); transform: scale(1.05); }
+  .ctrl-btn svg { width: 20px; height: 20px; }
+  .ctrl-btn.play svg { width: 22px; height: 22px; }
+  .volume-wrap {
+    display: flex; align-items: center;
+    gap: 2px;
+  }
+  .volume-slider {
+    width: 90px;
+    height: 4px;
+    background: rgba(255,255,255,0.18);
+    border-radius: 2px;
+    position: relative;
+    cursor: pointer;
+    margin: 0 8px;
+  }
+  .volume-level {
+    width: 72%;
+    height: 100%;
+    background: var(--text-secondary);
+    border-radius: inherit;
+  }
+  .playlist-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pl-close-btn {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+  }
+  .pl-close-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .pl-close-btn svg { width: 16px; height: 16px; }
+  .pl-toggle-btn {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+  }
+  .pl-toggle-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .pl-toggle-btn.active { color: var(--accent-light); background: var(--bg-hover); }
+  .pl-toggle-btn svg { width: 20px; height: 20px; }
+  .playlist {
+    transition: width 0.25s cubic-bezier(0.16,1,0.3,1), opacity 0.2s ease;
+  }
+  .playlist.collapsed {
+    width: 0;
+    opacity: 0;
+    border-left: none;
+    overflow: hidden;
+  }
+  .playlist {
+    width: 300px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    flex-direction: column;
+  }
+  .playlist-header {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .playlist-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .playlist-count {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .playlist-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .pl-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s ease;
+    position: relative;
+  }
+  .pl-item:hover { background: var(--bg-hover); }
+  .pl-item.active { background: var(--bg-hover); }
+  .pl-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 3px;
+    background: var(--accent);
+    border-radius: 0 2px 2px 0;
+  }
+  .pl-thumb {
+    width: 96px; height: 54px;
+    background: #22222a;
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    font-size: 11px;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .pl-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .pl-info { flex: 1; min-width: 0; }
+  .pl-title {
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+  .pl-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 8px;
+  }
+  .pl-playing {
+    width: 14px; height: 14px;
+    color: var(--accent-light);
+  }
+  .drop-zone {
+    position: absolute;
+    inset: 10px;
+    border: 2px dashed rgba(124,58,237,0.45);
+    border-radius: var(--radius-md);
+    background: rgba(124,58,237,0.08);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-secondary);
+    z-index: 20;
+  }
+  .drop-zone.show { display: flex; }
+  .drop-zone svg { width: 64px; height: 64px; color: var(--accent-light); }
+  .drop-zone h3 { margin: 0; font-size: 16px; font-weight: 500; color: var(--text-primary); }
+  .drop-zone p { margin: 0; font-size: 13px; }
+  .format-tags { display: flex; gap: 8px; margin-top: 8px; }
+  .format-tag {
+    padding: 4px 10px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-secondary);
+    z-index: 5;
+  }
+  .empty-state svg { width: 64px; height: 64px; color: var(--text-muted); }
+  .empty-state h3 { margin: 0; font-size: 16px; font-weight: 500; color: var(--text-primary); }
+  .empty-state p { margin: 0; font-size: 13px; }
+</style>
+
+<div class="device">
+  <div class="main-area">
+    <div class="title-bar">
+      <div class="title-left">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+        <span class="title-text">VideoPlayer — 星际穿越.Interstellar.2014.mp4</span>
+      </div>
+      <div class="title-right">
+        <div class="pl-toggle-btn active" id="pl-toggle" title="切换播放列表">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        </div>
+        <div class="win-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+        <div class="win-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></div>
+        <div class="win-btn close"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+      </div>
+    </div>
+
+    <div class="video-canvas">
+      <div class="empty-state" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+        <h3>拖拽视频文件到此处</h3>
+        <p>或点击打开文件选择窗口</p>
+        <div class="format-tags"><span class="format-tag">MP4</span><span class="format-tag">FLV</span><span class="format-tag">MKV</span><span class="format-tag">AVI</span></div>
+      </div>
+      <div class="big-play">
+        <svg viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      </div>
+    </div>
+
+    <div class="control-bar">
+      <div class="seek-row">
+        <span class="time-code">42:18</span>
+        <div class="seek-track">
+          <div class="seek-buffered"></div>
+          <div class="seek-played"></div>
+          <div class="seek-thumb"></div>
+        </div>
+        <span class="time-code">1:49:06</span>
+      </div>
+      <div class="controls-row">
+        <div class="controls-left">
+          <div class="ctrl-btn play">
+            <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </div>
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          </div>
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          </div>
+          <div class="volume-wrap">
+            <div class="ctrl-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            </div>
+            <div class="volume-slider"><div class="volume-level"></div></div>
+          </div>
+        </div>
+        <div class="controls-center">
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+          </div>
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+          </div>
+        </div>
+        <div class="controls-right">
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </div>
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </div>
+          <div class="ctrl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="playlist">
+    <div class="playlist-header">
+      <span class="playlist-title">播放列表</span>
+      <div class="playlist-header-right">
+        <span class="playlist-count">4 个视频</span>
+        <div class="pl-close-btn" id="pl-close" title="收起播放列表">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="playlist-body">
+      <div class="pl-item active">
+        <div class="pl-thumb">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+        <div class="pl-info">
+          <div class="pl-title">星际穿越.Interstellar.2014</div>
+          <div class="pl-meta"><span class="pl-playing">▶</span><span>1:49:06</span></div>
+        </div>
+      </div>
+      <div class="pl-item">
+        <div class="pl-thumb">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+        <div class="pl-info">
+          <div class="pl-title">盗梦空间.Inception.2010</div>
+          <div class="pl-meta"><span>2:28:09</span></div>
+        </div>
+      </div>
+      <div class="pl-item">
+        <div class="pl-thumb">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+        <div class="pl-info">
+          <div class="pl-title">沙丘.Dune.2021</div>
+          <div class="pl-meta"><span>2:35:30</span></div>
+        </div>
+      </div>
+      <div class="pl-item">
+        <div class="pl-thumb">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+        <div class="pl-info">
+          <div class="pl-title">银翼杀手2049.BladeRunner.2049</div>
+          <div class="pl-meta"><span>2:43:53</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="drop-zone">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    <h3>松开以添加视频</h3>
+    <p>支持 MP4、FLV、MKV、AVI、MOV</p>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var playlist = document.querySelector('.playlist');
+    var toggleBtn = document.getElementById('pl-toggle');
+    var closeBtn = document.getElementById('pl-close');
+
+    function togglePlaylist() {
+      var collapsed = playlist.classList.toggle('collapsed');
+      if (collapsed) {
+        toggleBtn.classList.remove('active');
+      } else {
+        toggleBtn.classList.add('active');
+      }
+    }
+
+    if (toggleBtn) toggleBtn.addEventListener('click', togglePlaylist);
+    if (closeBtn) closeBtn.addEventListener('click', togglePlaylist);
+  })();
+</script>
