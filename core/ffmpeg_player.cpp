@@ -1,6 +1,57 @@
 #include "ffmpeg_player.h"
 #include <QFileInfo>
 #include <QDebug>
+#include <QDateTime>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QUrl>
+#include <QThread>
+
+#include "dbg_trace.h"
+
+#pragma region debug-point no-audio-playback:reporter
+static void dbgReportFfmpeg(const char *hypothesisId, const char *location, const QString &msg, const QJsonObject &data)
+{
+    static QString url;
+    static QString sessionId;
+    static QNetworkAccessManager *nam = nullptr;
+    static bool inited = false;
+
+    if (!inited) {
+        url = QStringLiteral("http://127.0.0.1:7777/event");
+        sessionId = QStringLiteral("no-audio-playback");
+        QFile f(QStringLiteral(".dbg/no-audio-playback.env"));
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QByteArray c = f.readAll();
+            const QList<QByteArray> lines = c.split('\n');
+            for (const QByteArray &line : lines) {
+                if (line.startsWith("DEBUG_SERVER_URL=")) url = QString::fromUtf8(line.mid(strlen("DEBUG_SERVER_URL=")).trimmed());
+                if (line.startsWith("DEBUG_SESSION_ID=")) sessionId = QString::fromUtf8(line.mid(strlen("DEBUG_SESSION_ID=")).trimmed());
+            }
+        }
+        nam = new QNetworkAccessManager();
+        inited = true;
+    }
+
+    if (!nam) return;
+
+    QJsonObject obj;
+    obj.insert(QStringLiteral("sessionId"), sessionId);
+    obj.insert(QStringLiteral("runId"), QStringLiteral("pre"));
+    obj.insert(QStringLiteral("hypothesisId"), QString::fromUtf8(hypothesisId));
+    obj.insert(QStringLiteral("location"), QString::fromUtf8(location));
+    obj.insert(QStringLiteral("msg"), QStringLiteral("[DEBUG] ") + msg);
+    obj.insert(QStringLiteral("ts"), QDateTime::currentMSecsSinceEpoch());
+    obj.insert(QStringLiteral("data"), data);
+
+    QNetworkRequest req{QUrl(url)};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    nam->post(req, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+#pragma endregion
 
 FFmpegPlayer::FFmpegPlayer(QObject *parent)
     : QThread(parent)
@@ -24,6 +75,14 @@ bool FFmpegPlayer::open(const QString &filePath)
 
     m_filePath = filePath;
     m_fileName = QFileInfo(filePath).fileName();
+
+#pragma region debug-point D:open
+    {
+        QJsonObject d;
+        d.insert(QStringLiteral("file"), m_filePath);
+        dbgReportFfmpeg("D", "ffmpeg_player.cpp:open", "open file", d);
+    }
+#pragma endregion
 
     int ret = avformat_open_input(&m_fmtCtx, filePath.toUtf8().constData(), nullptr, nullptr);
     if (ret < 0) {
@@ -61,24 +120,11 @@ bool FFmpegPlayer::open(const QString &filePath)
                              m_rgbBuffer, AV_PIX_FMT_RGB24, m_videoWidth, m_videoHeight, 1);
     }
 
-    // Swresample: -> S16 stereo
+    // Swresample is configured later by setAudioOutputFormat() once the
+    // QAudioSink's real device format is known (some devices don't support
+    // the file's native sample rate / Int16, e.g. fall back to 48000/Float).
+    // Configuring swr here with hardcoded Int16 would just be rebuilt anyway.
     if (m_audioStreamIndex >= 0) {
-        m_swrCtx = swr_alloc();
-        AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
-        ret = swr_alloc_set_opts2(&m_swrCtx,
-                                  &outLayout, AV_SAMPLE_FMT_S16, m_audioSampleRate,
-                                  &m_audioCodecCtx->ch_layout, m_audioSampleFmt, m_audioSampleRate,
-                                  0, nullptr);
-        if (ret < 0) {
-            qWarning() << "Failed to set swresample options";
-        } else {
-            ret = swr_init(m_swrCtx);
-            if (ret < 0) {
-                qWarning() << "Failed to init swresample";
-            }
-        }
-        m_audioSampleFmt = AV_SAMPLE_FMT_S16;
-        m_audioChannels = 2;
         emit audioFormatChanged(m_audioSampleRate, m_audioChannels);
     }
 
@@ -115,9 +161,20 @@ bool FFmpegPlayer::openStreams()
                 continue;
             }
             m_audioStreamIndex = i;
-            m_audioSampleRate = codecPar->sample_rate;
-            m_audioChannels = codecPar->ch_layout.nb_channels;
-            m_audioSampleFmt = static_cast<AVSampleFormat>(codecPar->format);
+            m_audioSampleRate = m_audioCodecCtx->sample_rate;
+            m_audioChannels = m_audioCodecCtx->ch_layout.nb_channels;
+            m_audioSampleFmt = m_audioCodecCtx->sample_fmt;
+#pragma region debug-point D:audio-stream
+            {
+                QJsonObject d;
+                d.insert(QStringLiteral("streamIndex"), (double)i);
+                d.insert(QStringLiteral("codecName"), QString::fromUtf8(codec->name));
+                d.insert(QStringLiteral("sampleRate"), m_audioSampleRate);
+                d.insert(QStringLiteral("channels"), m_audioChannels);
+                d.insert(QStringLiteral("sampleFmt"), (double)m_audioSampleFmt);
+                dbgReportFfmpeg("D", "ffmpeg_player.cpp:openStreams", "audio stream opened", d);
+            }
+#pragma endregion
         }
     }
 
@@ -176,12 +233,16 @@ void FFmpegPlayer::close()
     m_videoWidth = 0;
     m_videoHeight = 0;
     m_audioClock = 0.0;
+    m_clockInited = 0;
+    m_wallClockBaseUs = 0;
+    m_ptsBaseSec = 0.0;
 }
 
 void FFmpegPlayer::play()
 {
     if (m_state == (int)PlayState::Stopped && m_fmtCtx) {
         m_stopRequested = 0;
+        m_clockInited = 0;
         start();
     }
     m_state = (int)PlayState::Playing;
@@ -216,20 +277,165 @@ void FFmpegPlayer::setVolume(int volume)
     m_volume = volume;
 }
 
+void FFmpegPlayer::setAudioOutputFormat(int sampleRate, int channels, QAudioFormat::SampleFormat sampleFormat)
+{
+    if (!m_audioCodecCtx) return;
+
+    if (m_swrCtx) {
+        swr_free(&m_swrCtx);
+    }
+
+#pragma region debug-point A:setAudioOutputFormat-entry
+    {
+        QJsonObject d;
+        d.insert(QStringLiteral("reqSampleRate"), sampleRate);
+        d.insert(QStringLiteral("reqChannels"), channels);
+        d.insert(QStringLiteral("reqSampleFormat"), (double)sampleFormat);
+        d.insert(QStringLiteral("inSampleRate"), m_audioCodecCtx->sample_rate);
+        d.insert(QStringLiteral("inChannels"), m_audioCodecCtx->ch_layout.nb_channels);
+        d.insert(QStringLiteral("inSampleFmt"), (double)m_audioCodecCtx->sample_fmt);
+        dbgReportFfmpeg("A", "ffmpeg_player.cpp:setAudioOutputFormat", "setAudioOutputFormat entry", d);
+    }
+#pragma endregion
+
+    AVChannelLayout outLayout;
+    av_channel_layout_default(&outLayout, channels);
+
+    AVSampleFormat outFmt = AV_SAMPLE_FMT_S16;
+    switch (sampleFormat) {
+    case QAudioFormat::UInt8:
+        outFmt = AV_SAMPLE_FMT_U8;
+        break;
+    case QAudioFormat::Int16:
+        outFmt = AV_SAMPLE_FMT_S16;
+        break;
+    case QAudioFormat::Int32:
+        outFmt = AV_SAMPLE_FMT_S32;
+        break;
+    case QAudioFormat::Float:
+        outFmt = AV_SAMPLE_FMT_FLT;
+        break;
+    default:
+        outFmt = AV_SAMPLE_FMT_S16;
+        sampleFormat = QAudioFormat::Int16;
+        break;
+    }
+
+    m_swrCtx = swr_alloc();
+    const int inSampleRate = m_audioCodecCtx->sample_rate;
+    const AVSampleFormat inSampleFmt = m_audioCodecCtx->sample_fmt;
+    const int outSampleRate = sampleRate;
+    const int outChannels = channels;
+
+    int ret = swr_alloc_set_opts2(&m_swrCtx,
+                                 &outLayout, outFmt, outSampleRate,
+                                 &m_audioCodecCtx->ch_layout, inSampleFmt, inSampleRate,
+                                 0, nullptr);
+    av_channel_layout_uninit(&outLayout);
+    const int initRet = (ret < 0) ? ret : swr_init(m_swrCtx);
+    if (initRet < 0) {
+#pragma region debug-point C:swr-init-fail
+        {
+            QJsonObject d;
+            d.insert(QStringLiteral("allocRet"), ret);
+            d.insert(QStringLiteral("initRet"), initRet);
+            dbgReportFfmpeg("C", "ffmpeg_player.cpp:setAudioOutputFormat", "swr init failed", d);
+        }
+#pragma endregion
+        DBG_TRACE("ffmpeg_player.cpp:setAudioOutputFormat",
+                  QString("swr INIT FAILED: allocRet=%1 initRet=%2 (in=%3/%4/fmt%5 -> req=%6/%7/fmt%8)")
+                      .arg(ret).arg(initRet)
+                      .arg(inSampleRate).arg(m_audioCodecCtx->ch_layout.nb_channels).arg((int)inSampleFmt)
+                      .arg(outSampleRate).arg(outChannels).arg((int)outFmt));
+        swr_free(&m_swrCtx);
+        return;
+    }
+
+    m_audioSampleRate = outSampleRate;
+    m_audioChannels = outChannels;
+    m_audioSampleFmt = outFmt;
+
+#pragma region debug-point C:swr-init-ok
+    {
+        QJsonObject d;
+        d.insert(QStringLiteral("outSampleRate"), m_audioSampleRate);
+        d.insert(QStringLiteral("outChannels"), m_audioChannels);
+        d.insert(QStringLiteral("outSampleFmt"), (double)m_audioSampleFmt);
+        dbgReportFfmpeg("C", "ffmpeg_player.cpp:setAudioOutputFormat", "swr init ok", d);
+    }
+#pragma endregion
+
+    DBG_TRACE("ffmpeg_player.cpp:setAudioOutputFormat",
+              QString("swr init OK: in=%1/%2/fmt%3 -> out=%4/%5/fmt%6 (QtSampleFmt=%7)")
+                  .arg(inSampleRate).arg(m_audioCodecCtx->ch_layout.nb_channels).arg((int)inSampleFmt)
+                  .arg(m_audioSampleRate).arg(m_audioChannels).arg((int)m_audioSampleFmt)
+                  .arg((int)sampleFormat));
+}
+
 void FFmpegPlayer::run()
 {
     decodeLoop();
+}
+
+double FFmpegPlayer::framePtsSec(const AVFrame *frame, const AVStream *stream) const
+{
+    int64_t ts = frame->pts;
+    if (ts == AV_NOPTS_VALUE) {
+        ts = frame->best_effort_timestamp;
+    }
+    if (ts == AV_NOPTS_VALUE) {
+        return -1.0;
+    }
+    return ts * av_q2d(stream->time_base);
+}
+
+void FFmpegPlayer::resetClock(double ptsBaseSec)
+{
+    m_wallClockBaseUs = av_gettime_relative();
+    m_ptsBaseSec = ptsBaseSec;
+    m_clockInited.storeRelaxed(1);
+}
+
+void FFmpegPlayer::syncToClock(double ptsSec, qint64 leadUs)
+{
+    if (m_state != (int)PlayState::Playing) return;
+    if (!m_clockInited.loadRelaxed()) {
+        resetClock(ptsSec);
+        return;
+    }
+    const qint64 nowUs = av_gettime_relative();
+    const double relSec = ptsSec - m_ptsBaseSec;
+    const qint64 targetUs = m_wallClockBaseUs + (qint64)(relSec * 1000000.0);
+    const qint64 aheadUs = targetUs - nowUs;
+    if (aheadUs <= leadUs) return;
+    qint64 sleepUs = aheadUs - leadUs;
+    if (sleepUs > 1000000) sleepUs = 1000000;
+    if (sleepUs > 0) {
+        usleep((unsigned long)sleepUs);
+    }
 }
 
 void FFmpegPlayer::decodeLoop()
 {
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
+    bool wasPaused = false;
+    int64_t pauseStartUs = 0;
 
     while (!m_stopRequested) {
         if (m_state == (int)PlayState::Paused) {
+            if (!wasPaused) {
+                pauseStartUs = av_gettime_relative();
+                wasPaused = true;
+            }
             msleep(50);
             continue;
+        }
+        if (wasPaused) {
+            if (m_clockInited.loadRelaxed()) {
+                m_wallClockBaseUs += (av_gettime_relative() - pauseStartUs);
+            }
+            wasPaused = false;
         }
 
         // Handle seek
@@ -252,6 +458,7 @@ void FFmpegPlayer::decodeLoop()
             m_videoQueue.clear();
             m_audioQueue.clear();
             m_audioClock = targetTs / 1000000.0;
+            resetClock(m_audioClock);
         }
 
         int ret = av_read_frame(m_fmtCtx, packet);
@@ -305,10 +512,14 @@ void FFmpegPlayer::processVideoFrame(AVFrame *frame)
 {
     if (!m_swsCtx || !m_rgbBuffer) return;
 
-    double pts = 0.0;
-    if (frame->pts != AV_NOPTS_VALUE) {
-        pts = frame->pts * av_q2d(m_fmtCtx->streams[m_videoStreamIndex]->time_base);
-    }
+    double pts = framePtsSec(frame, m_fmtCtx->streams[m_videoStreamIndex]);
+    if (pts < 0.0) pts = 0.0;
+    // Always pace video frames against the wall clock so the decode loop does
+    // not run ahead (which would starve audio and make the progress bar race).
+    // When there is audio, QAudioSink drains the audio queue at device rate;
+    // when there is not, this is the only clock. Either way, video pts is the
+    // correct reference for pacing the decode loop.
+    syncToClock(pts, 0);
 
     // Convert YUV -> RGB
     sws_scale(m_swsCtx, frame->data, frame->linesize, 0, m_videoHeight,
@@ -325,19 +536,36 @@ void FFmpegPlayer::processVideoFrame(AVFrame *frame)
 
     m_videoQueue.push(vf);
 
-    // Update position
-            m_positionMs.storeRelaxed((qint64)(pts * 1000));
-    emit positionChanged(m_positionMs);
+    if (m_audioStreamIndex < 0) {
+        m_positionMs.storeRelaxed((qint64)(pts * 1000));
+        emit positionChanged(m_positionMs);
+    }
 }
 
 void FFmpegPlayer::processAudioFrame(AVFrame *frame)
 {
-    if (!m_swrCtx) return;
-
-    double pts = 0.0;
-    if (frame->pts != AV_NOPTS_VALUE) {
-        pts = frame->pts * av_q2d(m_fmtCtx->streams[m_audioStreamIndex]->time_base);
+    if (!m_swrCtx) {
+        DBG_TRACE_THROTTLE(paNoSwr, "ffmpeg_player.cpp:processAudioFrame",
+            QStringLiteral("NO swrCtx — skipping audio frame (nb_samples=%1)").arg(frame->nb_samples),
+            1000);
+        return;
     }
+
+    static qint64 lastReportMs = 0;
+    static qint64 frames = 0;
+    static qint64 convertedTotal = 0;
+    static qint64 bytesTotal = 0;
+    static std::atomic<qint64> firstFrameMs{0};
+
+    double pts = framePtsSec(frame, m_fmtCtx->streams[m_audioStreamIndex]);
+    if (pts < 0.0) {
+        pts = m_audioClock;
+        if (pts < 0.0) pts = 0.0;
+    }
+    // Audio is paced by QAudioSink pulling from the queue at device sample rate.
+    // Do not block the decode thread with wall-clock sync here; pts jumps after
+    // seek or non-zero start offsets would otherwise cause long usleeps and
+    // starve the audio queue (sink stays Idle, outputs silence).
 
     // Resample to S16 stereo
     int outSamples = swr_get_out_samples(m_swrCtx, frame->nb_samples);
@@ -345,16 +573,17 @@ void FFmpegPlayer::processAudioFrame(AVFrame *frame)
 
     uint8_t *outData = nullptr;
     int outLinesize = 0;
-    int bufSize = av_samples_alloc(&outData, &outLinesize, 2, outSamples,
-                                   AV_SAMPLE_FMT_S16, 0);
+    int bufSize = av_samples_alloc(&outData, &outLinesize, m_audioChannels, outSamples,
+                                   m_audioSampleFmt, 0);
     if (bufSize < 0) return;
 
     int converted = swr_convert(m_swrCtx, &outData, outSamples,
                                 (const uint8_t **)frame->data, frame->nb_samples);
 
+    int dataSize = 0;
     if (converted > 0) {
-        int dataSize = av_samples_get_buffer_size(nullptr, 2, converted,
-                                                   AV_SAMPLE_FMT_S16, 1);
+        dataSize = av_samples_get_buffer_size(nullptr, m_audioChannels, converted,
+                                              m_audioSampleFmt, 1);
         if (dataSize > 0) {
             AudioChunk chunk;
             chunk.data = QByteArray((const char *)outData, dataSize);
@@ -362,6 +591,63 @@ void FFmpegPlayer::processAudioFrame(AVFrame *frame)
             m_audioQueue.push(chunk);
 
             m_audioClock = pts + (double)converted / m_audioSampleRate;
+            m_positionMs.storeRelaxed((qint64)(m_audioClock * 1000));
+            emit positionChanged(m_positionMs);
+        }
+    }
+
+    frames++;
+    if (converted > 0) convertedTotal += converted;
+    if (dataSize > 0) bytesTotal += dataSize;
+
+    // Log the very first audio frame to confirm the decode thread reached here.
+    if (firstFrameMs.load(std::memory_order_relaxed) == 0) {
+        firstFrameMs.store(QDateTime::currentMSecsSinceEpoch(), std::memory_order_relaxed);
+        DBG_TRACE("ffmpeg_player.cpp:processAudioFrame",
+                  QString("FIRST audio frame: pts=%1 nb_samples=%2 inFmt=%3 -> converted=%4 dataSize=%5 queueSize=%6 outFmt=%7")
+                      .arg(pts, 0, 'f', 3).arg(frame->nb_samples)
+                      .arg((int)frame->format).arg(converted).arg(dataSize)
+                      .arg(m_audioQueue.size()).arg((int)m_audioSampleFmt));
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (converted <= 0) {
+#pragma region debug-point C:swr-convert-bad
+        {
+            QJsonObject d;
+            d.insert(QStringLiteral("converted"), converted);
+            d.insert(QStringLiteral("frameNbSamples"), frame->nb_samples);
+            d.insert(QStringLiteral("outSamples"), outSamples);
+            d.insert(QStringLiteral("pts"), pts);
+            d.insert(QStringLiteral("queueSize"), (double)m_audioQueue.size());
+            dbgReportFfmpeg("C", "ffmpeg_player.cpp:processAudioFrame", "swr_convert returned <=0", d);
+        }
+#pragma endregion
+        DBG_TRACE_THROTTLE(paBadConvert, "ffmpeg_player.cpp:processAudioFrame",
+            QString("swr_convert<=0: converted=%1 nb_samples=%2 outSamples=%3").arg(converted).arg(frame->nb_samples).arg(outSamples),
+            500);
+    } else {
+        DBG_TRACE_THROTTLE(paStats, "ffmpeg_player.cpp:processAudioFrame",
+            QString("audio push: frames=%1 convertedTotal=%2 bytesTotal=%3 queueSize=%4 audioClock=%5 outFmt=%6")
+                .arg(frames).arg(convertedTotal).arg(bytesTotal)
+                .arg(m_audioQueue.size()).arg(m_audioClock, 0, 'f', 3).arg((int)m_audioSampleFmt),
+            1000);
+        if (nowMs - lastReportMs >= 1000) {
+#pragma region debug-point B:audio-push-stats
+            {
+                QJsonObject d;
+                d.insert(QStringLiteral("frames"), (double)frames);
+                d.insert(QStringLiteral("convertedTotal"), (double)convertedTotal);
+                d.insert(QStringLiteral("bytesTotal"), (double)bytesTotal);
+                d.insert(QStringLiteral("queueSize"), (double)m_audioQueue.size());
+                d.insert(QStringLiteral("audioClock"), m_audioClock);
+                d.insert(QStringLiteral("sampleRate"), m_audioSampleRate);
+                d.insert(QStringLiteral("channels"), m_audioChannels);
+                d.insert(QStringLiteral("sampleFmt"), (double)m_audioSampleFmt);
+                dbgReportFfmpeg("B", "ffmpeg_player.cpp:processAudioFrame", "audio push stats", d);
+            }
+#pragma endregion
+            lastReportMs = nowMs;
         }
     }
 

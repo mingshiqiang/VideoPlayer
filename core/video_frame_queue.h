@@ -73,6 +73,9 @@ public:
 
     void push(const AudioChunk &chunk) {
         QMutexLocker locker(&m_mutex);
+        while (m_queue.size() >= m_maxSize) {
+            m_queue.dequeue();
+        }
         m_queue.enqueue(chunk);
         m_cond.wakeOne();
     }

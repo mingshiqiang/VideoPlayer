@@ -8,6 +8,7 @@
 #include <QAtomicInt>
 #include <QAtomicInteger>
 #include <QWaitCondition>
+#include <QAudioFormat>
 
 #include "video_frame_queue.h"
 
@@ -18,6 +19,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/time.h>
+#include <libavutil/channel_layout.h>
 }
 
 enum class PlayState {
@@ -40,6 +42,7 @@ public:
     void stop();
     void seek(qint64 positionMs);
     void setVolume(int volume);
+    void setAudioOutputFormat(int sampleRate, int channels, QAudioFormat::SampleFormat sampleFormat);
 
     PlayState state() const { return (PlayState)m_state.loadRelaxed(); }
     qint64 duration() const { return m_durationMs; }
@@ -76,6 +79,9 @@ private:
     void decodeLoop();
     void processVideoFrame(AVFrame *frame);
     void processAudioFrame(AVFrame *frame);
+    double framePtsSec(const AVFrame *frame, const AVStream *stream) const;
+    void resetClock(double ptsBaseSec);
+    void syncToClock(double ptsSec, qint64 leadUs);
 
     // FFmpeg context
     AVFormatContext *m_fmtCtx = nullptr;
@@ -115,6 +121,9 @@ private:
 
     // Clock
     double m_audioClock = 0.0;
+    qint64 m_wallClockBaseUs = 0;
+    double m_ptsBaseSec = 0.0;
+    QAtomicInt m_clockInited { 0 };
 
     // Frame queues
     VideoFrameQueue m_videoQueue;

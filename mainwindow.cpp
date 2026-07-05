@@ -338,6 +338,8 @@ void MainWindow::openFile(const QString &path)
     if (m_player->hasAudio()) {
         m_audioOutput->start(m_player->audioSampleRate(), m_player->audioChannels(),
                              m_player->audioQueue());
+        const QAudioFormat &fmt = m_audioOutput->format();
+        m_player->setAudioOutputFormat(fmt.sampleRate(), fmt.channelCount(), fmt.sampleFormat());
         m_audioOutput->setVolume(m_player->volume());
         m_audioStarted = true;
     }
@@ -352,10 +354,13 @@ void MainWindow::openFile(const QString &path)
 
 void MainWindow::onOpenFile()
 {
-    QString path = QFileDialog::getOpenFileName(this, "Open Video File", "",
+    QSettings settings;
+    QString lastDir = settings.value("lastOpenDir").toString();
+    QString path = QFileDialog::getOpenFileName(this, "Open Video File", lastDir,
         "Video Files (*.mp4 *.flv *.mkv *.avi *.mov *.webm *.ts *.wmv *.m4v);;All Files (*.*)");
 
     if (!path.isEmpty()) {
+        settings.setValue("lastOpenDir", QFileInfo(path).absolutePath());
         m_playlistWidget->clear();
         m_playlistWidget->addFile(path);
         m_playlistWidget->setCurrentIndex(0);

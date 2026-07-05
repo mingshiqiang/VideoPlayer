@@ -17,9 +17,15 @@ public:
     void start();
     void stop();
 
+    // Called by AudioOutput when new audio chunks are pushed, so the device
+    // can emit readyRead() to wake the QAudioSink pull loop on Windows
+    // (QWindowsAudioSink only re-pulls on readyRead after the initial start).
+    void notifyDataReady();
+
 protected:
     qint64 readData(char *data, qint64 maxlen) override;
     qint64 writeData(const char *data, qint64 len) override;
+    qint64 bytesAvailable() const override;
 
 private:
     AudioChunkQueue *m_queue;
@@ -36,6 +42,7 @@ public:
     void start(int sampleRate, int channels, AudioChunkQueue *queue);
     void stop();
     void setVolume(int volume);
+    const QAudioFormat& format() const { return m_format; }
 
 private:
     QAudioSink *m_audioSink = nullptr;

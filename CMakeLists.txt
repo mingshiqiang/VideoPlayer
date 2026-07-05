@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 # Qt6 modules
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia OpenGL OpenGLWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia OpenGL OpenGLWidgets Network)
 
 qt_standard_project_setup()
 
@@ -37,6 +37,7 @@ set(PROJECT_SOURCES
     core/audio_output.h
     core/audio_output.cpp
     core/video_frame_queue.h
+    core/dbg_trace.h
     ui/titlebar.h
     ui/titlebar.cpp
     ui/controlbar.h
@@ -68,6 +69,7 @@ target_link_libraries(VideoPlayer
         Qt::Multimedia
         Qt::OpenGL
         Qt::OpenGLWidgets
+        Qt::Network
 )
 
 # FFmpeg libraries
