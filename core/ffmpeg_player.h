@@ -42,12 +42,14 @@ public:
     void stop();
     void seek(qint64 positionMs);
     void setVolume(int volume);
+    void setSpeed(double speed);
     void setAudioOutputFormat(int sampleRate, int channels, QAudioFormat::SampleFormat sampleFormat);
 
     PlayState state() const { return (PlayState)m_state.loadRelaxed(); }
     qint64 duration() const { return m_durationMs; }
     qint64 position() const { return m_positionMs.loadRelaxed(); }
     int volume() const { return m_volume; }
+    double speed() const { return m_speed.loadRelaxed(); }
     bool hasVideo() const { return m_videoStreamIndex >= 0; }
     bool hasAudio() const { return m_audioStreamIndex >= 0; }
     QString fileName() const { return m_fileName; }
@@ -67,6 +69,7 @@ signals:
     void durationChanged(qint64 durationMs);
     void videoInfoChanged(int width, int height);
     void audioFormatChanged(int sampleRate, int channels);
+    void speedChanged(double speed);
     void errorOccurred(const QString &message);
     void finished();
 
@@ -79,6 +82,7 @@ private:
     void decodeLoop();
     void processVideoFrame(AVFrame *frame);
     void processAudioFrame(AVFrame *frame);
+    void rebuildSwr();   // re-create swr using current speed / sink format
     double framePtsSec(const AVFrame *frame, const AVStream *stream) const;
     void resetClock(double ptsBaseSec);
     void syncToClock(double ptsSec, qint64 leadUs);
@@ -113,6 +117,15 @@ private:
     QAtomicInt m_seekTargetMs { 0 };
     QAtomicInt m_volume { 100 };
     QAtomicInt m_stopRequested { 0 };
+    // Playback speed (0.5..3.0). Stored as fixed-point thousandths to fit in
+    // QAtomicInt (e.g. 1.5x -> 1500).
+    QAtomicInt m_speed { 1000 };
+
+    // The sample rate requested by the audio sink; swr output rate is derived
+    // from this divided by speed for time-stretch playback.
+    int m_sinkSampleRate = 44100;
+    int m_sinkChannels = 2;
+    QAudioFormat::SampleFormat m_sinkSampleFormat = QAudioFormat::Int16;
 
     qint64 m_durationMs = 0;
     QAtomicInteger<qint64> m_positionMs { 0 };

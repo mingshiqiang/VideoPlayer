@@ -115,12 +115,16 @@ void VideoCanvas::paintGL()
     m_program->release();
 }
 
+QImage VideoCanvas::currentFrame() const
+{
+    return m_currentFrame;
+}
+
 void VideoCanvas::setVideoFrame(const QImage &frame)
 {
     m_currentFrame = frame;
     m_hasFrame = true;
     m_frameChanged = true;
-
     // Create texture if not exists or size changed
     if (!m_texture || m_texture->width() != frame.width() || m_texture->height() != frame.height()) {
         makeCurrent();

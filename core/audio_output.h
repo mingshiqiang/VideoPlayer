@@ -41,6 +41,8 @@ public:
 
     void start(int sampleRate, int channels, AudioChunkQueue *queue);
     void stop();
+    void suspend();
+    void resume();
     void setVolume(int volume);
     const QAudioFormat& format() const { return m_format; }
 

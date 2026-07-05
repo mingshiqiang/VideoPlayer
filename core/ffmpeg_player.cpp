@@ -53,6 +53,12 @@ static void dbgReportFfmpeg(const char *hypothesisId, const char *location, cons
 }
 #pragma endregion
 
+// Convert the atomic fixed-point speed (thousandths) to a double.
+static inline double speedFromAtomic(const QAtomicInt &a)
+{
+    return a.loadRelaxed() / 1000.0;
+}
+
 FFmpegPlayer::FFmpegPlayer(QObject *parent)
     : QThread(parent)
     , m_videoQueue(3)
@@ -281,9 +287,11 @@ void FFmpegPlayer::setAudioOutputFormat(int sampleRate, int channels, QAudioForm
 {
     if (!m_audioCodecCtx) return;
 
-    if (m_swrCtx) {
-        swr_free(&m_swrCtx);
-    }
+    // Remember what the sink expects; swr output rate is derived from this and
+    // the current playback speed (see rebuildSwr).
+    m_sinkSampleRate = sampleRate;
+    m_sinkChannels = channels;
+    m_sinkSampleFormat = sampleFormat;
 
 #pragma region debug-point A:setAudioOutputFormat-entry
     {
@@ -297,6 +305,20 @@ void FFmpegPlayer::setAudioOutputFormat(int sampleRate, int channels, QAudioForm
         dbgReportFfmpeg("A", "ffmpeg_player.cpp:setAudioOutputFormat", "setAudioOutputFormat entry", d);
     }
 #pragma endregion
+
+    rebuildSwr();
+}
+
+void FFmpegPlayer::rebuildSwr()
+{
+    if (!m_audioCodecCtx) return;
+
+    if (m_swrCtx) {
+        swr_free(&m_swrCtx);
+    }
+
+    const int channels = m_sinkChannels;
+    const QAudioFormat::SampleFormat sampleFormat = m_sinkSampleFormat;
 
     AVChannelLayout outLayout;
     av_channel_layout_default(&outLayout, channels);
@@ -317,15 +339,19 @@ void FFmpegPlayer::setAudioOutputFormat(int sampleRate, int channels, QAudioForm
         break;
     default:
         outFmt = AV_SAMPLE_FMT_S16;
-        sampleFormat = QAudioFormat::Int16;
         break;
     }
+
+    // Time-stretch via resampling: produce samples at sinkRate/speed, then the
+    // sink plays them at sinkRate -> effective playback speed = `speed`.
+    // Pitch shifts (this is simple resampling, not a phase-vocoder), which is
+    // acceptable for a video player's quick scan mode.
+    const double speed = speedFromAtomic(m_speed);
+    const int outSampleRate = qBound(4000, (int)(m_sinkSampleRate / speed), 192000);
 
     m_swrCtx = swr_alloc();
     const int inSampleRate = m_audioCodecCtx->sample_rate;
     const AVSampleFormat inSampleFmt = m_audioCodecCtx->sample_fmt;
-    const int outSampleRate = sampleRate;
-    const int outChannels = channels;
 
     int ret = swr_alloc_set_opts2(&m_swrCtx,
                                  &outLayout, outFmt, outSampleRate,
@@ -339,37 +365,52 @@ void FFmpegPlayer::setAudioOutputFormat(int sampleRate, int channels, QAudioForm
             QJsonObject d;
             d.insert(QStringLiteral("allocRet"), ret);
             d.insert(QStringLiteral("initRet"), initRet);
-            dbgReportFfmpeg("C", "ffmpeg_player.cpp:setAudioOutputFormat", "swr init failed", d);
+            dbgReportFfmpeg("C", "ffmpeg_player.cpp:rebuildSwr", "swr init failed", d);
         }
 #pragma endregion
-        DBG_TRACE("ffmpeg_player.cpp:setAudioOutputFormat",
-                  QString("swr INIT FAILED: allocRet=%1 initRet=%2 (in=%3/%4/fmt%5 -> req=%6/%7/fmt%8)")
+        DBG_TRACE("ffmpeg_player.cpp:rebuildSwr",
+                  QString("swr INIT FAILED: allocRet=%1 initRet=%2 (in=%3/%4/fmt%5 -> out=%6/%7/fmt%8 speed=%9)")
                       .arg(ret).arg(initRet)
                       .arg(inSampleRate).arg(m_audioCodecCtx->ch_layout.nb_channels).arg((int)inSampleFmt)
-                      .arg(outSampleRate).arg(outChannels).arg((int)outFmt));
+                      .arg(outSampleRate).arg(channels).arg((int)outFmt).arg(speed, 0, 'f', 3));
         swr_free(&m_swrCtx);
         return;
     }
 
-    m_audioSampleRate = outSampleRate;
-    m_audioChannels = outChannels;
+    // Keep m_audioSampleRate as the SINK rate (used for clock math and chunk
+    // timing); swr actually outputs at outSampleRate.
+    m_audioSampleRate = m_sinkSampleRate;
+    m_audioChannels = channels;
     m_audioSampleFmt = outFmt;
 
 #pragma region debug-point C:swr-init-ok
     {
         QJsonObject d;
-        d.insert(QStringLiteral("outSampleRate"), m_audioSampleRate);
+        d.insert(QStringLiteral("outSampleRate"), outSampleRate);
+        d.insert(QStringLiteral("sinkSampleRate"), m_sinkSampleRate);
         d.insert(QStringLiteral("outChannels"), m_audioChannels);
         d.insert(QStringLiteral("outSampleFmt"), (double)m_audioSampleFmt);
-        dbgReportFfmpeg("C", "ffmpeg_player.cpp:setAudioOutputFormat", "swr init ok", d);
+        dbgReportFfmpeg("C", "ffmpeg_player.cpp:rebuildSwr", "swr init ok", d);
     }
 #pragma endregion
 
-    DBG_TRACE("ffmpeg_player.cpp:setAudioOutputFormat",
-              QString("swr init OK: in=%1/%2/fmt%3 -> out=%4/%5/fmt%6 (QtSampleFmt=%7)")
+    DBG_TRACE("ffmpeg_player.cpp:rebuildSwr",
+              QString("swr OK: in=%1/%2/fmt%3 -> out=%4 (sink=%5)/%6/fmt%7 speed=%8")
                   .arg(inSampleRate).arg(m_audioCodecCtx->ch_layout.nb_channels).arg((int)inSampleFmt)
-                  .arg(m_audioSampleRate).arg(m_audioChannels).arg((int)m_audioSampleFmt)
-                  .arg((int)sampleFormat));
+                  .arg(outSampleRate).arg(m_sinkSampleRate).arg(m_audioChannels)
+                  .arg((int)m_audioSampleFmt).arg(speed, 0, 'f', 3));
+}
+
+void FFmpegPlayer::setSpeed(double speed)
+{
+    if (speed < 0.25) speed = 0.25;
+    if (speed > 4.0) speed = 4.0;
+    m_speed.storeRelaxed((int)(speed * 1000));
+    // Re-create swr so audio time-stretch follows the new speed.
+    rebuildSwr();
+    // Reset clock so video re-syncs to the new pace immediately.
+    m_clockInited.storeRelaxed(0);
+    emit speedChanged(speed);
 }
 
 void FFmpegPlayer::run()
@@ -403,9 +444,11 @@ void FFmpegPlayer::syncToClock(double ptsSec, qint64 leadUs)
         resetClock(ptsSec);
         return;
     }
+    const double speed = speedFromAtomic(m_speed);
     const qint64 nowUs = av_gettime_relative();
+    // Wall-clock target advances pts/speed: at 2x, a 1s pts span plays in 0.5s.
     const double relSec = ptsSec - m_ptsBaseSec;
-    const qint64 targetUs = m_wallClockBaseUs + (qint64)(relSec * 1000000.0);
+    const qint64 targetUs = m_wallClockBaseUs + (qint64)(relSec / speed * 1000000.0);
     const qint64 aheadUs = targetUs - nowUs;
     if (aheadUs <= leadUs) return;
     qint64 sleepUs = aheadUs - leadUs;
@@ -590,7 +633,9 @@ void FFmpegPlayer::processAudioFrame(AVFrame *frame)
             chunk.pts = pts;
             m_audioQueue.push(chunk);
 
-            m_audioClock = pts + (double)converted / m_audioSampleRate;
+            // Use the frame pts as the audio clock; the previous converted/rate
+            // estimate was wrong under speed != 1 (swr outputs at sinkRate/speed).
+            m_audioClock = pts;
             m_positionMs.storeRelaxed((qint64)(m_audioClock * 1000));
             emit positionChanged(m_positionMs);
         }

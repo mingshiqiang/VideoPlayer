@@ -202,7 +202,7 @@ void PlaylistWidget::updateItemHighlight()
     for (int i = 0; i < m_listWidget->count(); ++i) {
         auto *item = m_listWidget->item(i);
         if (i == m_currentIndex) {
-            item->setBackground(QColor(124, 58, 237, 30));
+            item->setBackground(QColor(124, 58, 237, 90));
             QFont f = item->font();
             f.setBold(true);
             item->setFont(f);

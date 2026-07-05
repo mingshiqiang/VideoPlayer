@@ -4,6 +4,18 @@
 #include <QPainter>
 #include <QLinearGradient>
 #include <QStyle>
+#include <QIcon>
+#include <QPixmap>
+
+namespace {
+// Load an SVG icon from the compiled resource, scaled to 16x16 for the
+// 28x28 title-bar buttons.
+QIcon makeIcon(const char *resPath)
+{
+    QIcon icon(QString::fromUtf8(resPath));
+    return icon;
+}
+}  // namespace
 
 TitleBar::TitleBar(QWidget *parent)
     : QWidget(parent)
@@ -12,7 +24,15 @@ TitleBar::TitleBar(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground);
 
     m_logoLabel = new QLabel(this);
-    m_logoLabel->setText(">");
+    m_logoLabel->setFixedSize(24, 24);
+    m_logoLabel->setAlignment(Qt::AlignCenter);
+    {
+        // Render the SVG logo to a pixmap at 2x for crisp rendering on HiDPI.
+        const int logoPx = 24;
+        QPixmap pm = QIcon(QStringLiteral(":/icons/resources/logo.svg"))
+                         .pixmap(QSize(logoPx, logoPx));
+        m_logoLabel->setPixmap(pm);
+    }
 
     m_titleLabel = new QLabel("VideoPlayer", this);
 
@@ -20,7 +40,8 @@ TitleBar::TitleBar(QWidget *parent)
     m_openBtn->setFixedSize(28, 28);
     m_openBtn->setCursor(Qt::PointingHandCursor);
     m_openBtn->setToolTip("Open file (Ctrl+O)");
-    m_openBtn->setText("+");
+    m_openBtn->setIcon(makeIcon(":/icons/resources/load_video.svg"));
+    m_openBtn->setIconSize(QSize(16, 16));
 
     m_playlistBtn = new QPushButton(this);
     m_playlistBtn->setFixedSize(28, 28);
@@ -28,49 +49,53 @@ TitleBar::TitleBar(QWidget *parent)
     m_playlistBtn->setToolTip("Toggle playlist (L)");
     m_playlistBtn->setCheckable(true);
     m_playlistBtn->setChecked(true);
-    m_playlistBtn->setText("=");
+    m_playlistBtn->setIcon(makeIcon(":/icons/resources/expand_list.svg"));
+    m_playlistBtn->setIconSize(QSize(16, 16));
 
     m_minBtn = new QPushButton(this);
     m_minBtn->setFixedSize(28, 28);
     m_minBtn->setCursor(Qt::PointingHandCursor);
-    m_minBtn->setText("-");
+    m_minBtn->setIcon(makeIcon(":/icons/resources/minimize.svg"));
+    m_minBtn->setIconSize(QSize(16, 16));
 
     m_maxBtn = new QPushButton(this);
     m_maxBtn->setFixedSize(28, 28);
     m_maxBtn->setCursor(Qt::PointingHandCursor);
-    m_maxBtn->setText("o");
+    m_maxBtn->setIcon(makeIcon(":/icons/resources/max.svg"));
+    m_maxBtn->setIconSize(QSize(16, 16));
 
     m_closeBtn = new QPushButton(this);
     m_closeBtn->setFixedSize(28, 28);
     m_closeBtn->setCursor(Qt::PointingHandCursor);
-    m_closeBtn->setText("x");
-    m_logoLabel->setFixedSize(24, 24);
-    m_logoLabel->setAlignment(Qt::AlignCenter);
-    m_logoLabel->setStyleSheet(
-        "background-color: #7c3aed; border-radius: 6px; color: white; font-size: 12px; font-weight: bold;");
+    m_closeBtn->setIcon(makeIcon(":/icons/resources/close.svg"));
+    m_closeBtn->setIconSize(QSize(16, 16));
 
     m_titleLabel->setStyleSheet("color: white; font-size: 13px; font-weight: 500;");
 
     m_openBtn->setStyleSheet(
-        "QPushButton { background: transparent; border: none; color: rgba(255,255,255,0.7); "
-        "font-size: 16px; font-weight: bold; border-radius: 6px; }"
-        "QPushButton:hover { background: rgba(255,255,255,0.1); color: white; }");
+        "QPushButton { background: transparent; border: none; border-radius: 6px; }"
+        "QPushButton:hover { background: rgba(255,255,255,0.1); }");
 
     m_playlistBtn->setStyleSheet(
-        "QPushButton { background: transparent; border: none; color: rgba(255,255,255,0.7); "
-        "font-size: 14px; font-weight: bold; border-radius: 6px; }"
-        "QPushButton:hover { background: rgba(255,255,255,0.1); color: white; }"
-        "QPushButton:checked { color: #a78bfa; }");
+        "QPushButton { background: transparent; border: none; border-radius: 6px; }"
+        "QPushButton:hover { background: rgba(255,255,255,0.1); }");
 
     m_minBtn->setStyleSheet(
-        "QPushButton { background: transparent; border: none; color: rgba(255,255,255,0.7); "
-        "font-size: 14px; font-weight: bold; border-radius: 6px; }"
-        "QPushButton:hover { background: rgba(255,255,255,0.1); color: white; }");
+        "QPushButton { background: transparent; border: none; border-radius: 6px; }"
+        "QPushButton:hover { background: rgba(255,255,255,0.1); }");
 
     m_maxBtn->setStyleSheet(
-        "QPushButton { background: transparent; border: none; color: rgba(255,255,255,0.7); "
-        "font-size: 12px; font-weight: bold; border-radius: 6px; }"
-        "QPushButton:hover { background: rgba(255,255,255,0.1); color: white; }");
+        "QPushButton { background: transparent; border: none; border-radius: 6px; }"
+        "QPushButton:hover { background: rgba(255,255,255,0.1); }");
+
+    m_closeBtn->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 6px; }"
+        "QPushButton:hover { background: rgba(255,255,255,0.1); }");
+
+    // Title-bar buttons are mouse-only; keep keyboard focus off them so that
+    // global shortcuts (Space/F/L/...) work and no button shows a focus rect.
+    for (QPushButton *btn : {m_openBtn, m_playlistBtn, m_minBtn, m_maxBtn, m_closeBtn})
+        btn->setFocusPolicy(Qt::NoFocus);
 
     auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(10, 0, 10, 0);
@@ -100,6 +125,14 @@ void TitleBar::setActive(bool active)
 {
     QString color = active ? "white" : "rgba(255,255,255,0.5)";
     m_titleLabel->setStyleSheet(QString("color: %1; font-size: 13px; font-weight: 500;").arg(color));
+}
+
+void TitleBar::setMaximized(bool maximized)
+{
+    m_isMaximized = maximized;
+    m_maxBtn->setIcon(makeIcon(maximized ? ":/icons/resources/normal.svg"
+                                         : ":/icons/resources/max.svg"));
+    m_maxBtn->setIconSize(QSize(16, 16));
 }
 
 void TitleBar::mousePressEvent(QMouseEvent *event)

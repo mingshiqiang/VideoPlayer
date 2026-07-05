@@ -17,6 +17,7 @@ public:
     ~VideoCanvas();
 
     void setVideoFrame(const QImage &frame);
+    QImage currentFrame() const;
     void clearFrame();
     void setAutoRefresh(bool enabled);
     void setVideoFrameQueue(VideoFrameQueue *queue);

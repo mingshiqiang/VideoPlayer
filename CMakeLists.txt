@@ -7,9 +7,12 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 # Qt6 modules
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia OpenGL OpenGLWidgets Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia OpenGL OpenGLWidgets Network Svg)
 
 qt_standard_project_setup()
+
+# Qt resources (SVG icons)
+qt_add_resources(RESOURCES resources.qrc)
 
 # FFmpeg paths
 set(FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/third_part/ffmpeg-8.1-full_build-shared")
@@ -48,11 +51,14 @@ set(PROJECT_SOURCES
     ui/slider.cpp
     ui/playlist_widget.h
     ui/playlist_widget.cpp
+    ui/settings_dialog.h
+    ui/settings_dialog.cpp
 )
 
 qt_add_executable(VideoPlayer
     WIN32
     ${PROJECT_SOURCES}
+    ${RESOURCES}
 )
 
 # Include directories
@@ -70,6 +76,7 @@ target_link_libraries(VideoPlayer
         Qt::OpenGL
         Qt::OpenGLWidgets
         Qt::Network
+        Qt::Svg
 )
 
 # FFmpeg libraries

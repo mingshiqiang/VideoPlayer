@@ -32,6 +32,12 @@ public:
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+
+private:
+    int valueFromPos(const QPoint &pos) const;
+    bool m_dragging = false;
 };
 
 #endif // SLIDER_H

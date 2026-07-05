@@ -257,6 +257,23 @@ void AudioOutput::stop()
     }
 }
 
+void AudioOutput::suspend()
+{
+    // Suspend the sink so it stops pulling from AudioIODevice; otherwise it
+    // keeps draining the queue (and emitting silence) while the decode loop is
+    // paused, making "pause" appear not to work for audio.
+    if (m_audioSink) {
+        m_audioSink->suspend();
+    }
+}
+
+void AudioOutput::resume()
+{
+    if (m_audioSink) {
+        m_audioSink->resume();
+    }
+}
+
 void AudioOutput::setVolume(int volume)
 {
     if (m_audioSink) {

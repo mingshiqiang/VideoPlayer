@@ -14,6 +14,7 @@ public:
 
     void setFileName(const QString &name);
     void setActive(bool active);
+    void setMaximized(bool maximized);
 
 signals:
     void minimizeClicked();

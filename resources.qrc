@@ -1,0 +1,20 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file>resources/close.svg</file>
+        <file>resources/expand_list.svg</file>
+        <file>resources/full_screen.svg</file>
+        <file>resources/load_video.svg</file>
+        <file>resources/logo.svg</file>
+        <file>resources/max.svg</file>
+        <file>resources/minimize.svg</file>
+        <file>resources/next.svg</file>
+        <file>resources/normal.svg</file>
+        <file>resources/pause.svg</file>
+        <file>resources/play.svg</file>
+        <file>resources/previous.svg</file>
+        <file>resources/screenshot.svg</file>
+        <file>resources/set.svg</file>
+        <file>resources/volume.svg</file>
+        <file>resources/mute.svg</file>
+    </qresource>
+</RCC>
