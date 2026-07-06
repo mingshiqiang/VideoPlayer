@@ -21,7 +21,6 @@ public:
 protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
-    void paintEvent(QPaintEvent *event) override;
 
 private slots:
     void onBrowseClicked();
@@ -31,6 +30,7 @@ private:
     void loadSettings();
     void saveSettings();
 
+    QWidget *m_panel = nullptr;
     QWidget *m_titleBar = nullptr;
     QLabel *m_titleLabel = nullptr;
     QPushButton *m_closeBtn = nullptr;

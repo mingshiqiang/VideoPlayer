@@ -2,7 +2,6 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
-#include <QPainter>
 #include <QMouseEvent>
 #include <QFileDialog>
 #include <QSettings>
@@ -10,16 +9,32 @@
 #include <QDir>
 #include <QFrame>
 #include <QIcon>
+#include <QGraphicsDropShadowEffect>
+
+namespace {
+constexpr int kDialogWidth = 640;
+constexpr int kDialogHeight = 420;
+constexpr int kShadowMargin = 18;
+}
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
-    setAttribute(Qt::WA_TranslucentBackground, false);
-    setFixedSize(640, 420);
+    setAttribute(Qt::WA_TranslucentBackground);
+    setFixedSize(kDialogWidth + kShadowMargin * 2, kDialogHeight + kShadowMargin * 2);
+
+    m_panel = new QWidget(this);
+    m_panel->setObjectName("settingsPanel");
+    m_panel->setFixedSize(kDialogWidth, kDialogHeight);
+    auto *shadowEffect = new QGraphicsDropShadowEffect(m_panel);
+    shadowEffect->setBlurRadius(32);
+    shadowEffect->setOffset(0, 2);
+    shadowEffect->setColor(QColor(200, 200, 200, 150));
+    m_panel->setGraphicsEffect(shadowEffect);
 
     // --- Title bar ---
-    m_titleBar = new QWidget(this);
+    m_titleBar = new QWidget(m_panel);
     m_titleBar->setFixedHeight(40);
     m_titleBar->setObjectName("settingsTitleBar");
     m_titleBar->setStyleSheet(
@@ -48,7 +63,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::reject);
 
     // --- Left category list ---
-    m_categoryList = new QListWidget(this);
+    m_categoryList = new QListWidget(m_panel);
     m_categoryList->setFixedWidth(160);
     m_categoryList->setStyleSheet(
         "QListWidget { background-color: #0e0e12; border: none; outline: none; }"
@@ -60,7 +75,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_categoryList->setCurrentRow(0);
 
     // --- Right content stack ---
-    m_stack = new QStackedWidget(this);
+    m_stack = new QStackedWidget(m_panel);
 
     // Screenshot page
     auto *shotPage = new QWidget();
@@ -109,7 +124,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     connect(m_categoryList, &QListWidget::currentRowChanged, this, &SettingsDialog::onCategoryChanged);
 
     // --- Bottom button row ---
-    auto *bottomBar = new QWidget(this);
+    auto *bottomBar = new QWidget(m_panel);
     bottomBar->setFixedHeight(56);
     bottomBar->setStyleSheet("background-color: #0e0e12;");
     QPushButton *okBtn = new QPushButton("OK", bottomBar);
@@ -151,14 +166,19 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     stackLayout->addWidget(m_stack);
     bodyLayout->addWidget(stackFrame, 1);
 
-    auto *mainLayout = new QVBoxLayout(this);
+    auto *mainLayout = new QVBoxLayout(m_panel);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
     mainLayout->addWidget(m_titleBar);
     mainLayout->addLayout(bodyLayout, 1);
     mainLayout->addWidget(bottomBar);
 
-    setStyleSheet("SettingsDialog { background-color: #0a0a0c; border-radius: 8px; }");
+    auto *outerLayout = new QVBoxLayout(this);
+    outerLayout->setContentsMargins(kShadowMargin, kShadowMargin, kShadowMargin, kShadowMargin);
+    outerLayout->setSpacing(0);
+    outerLayout->addWidget(m_panel);
+
+    setStyleSheet("QWidget#settingsPanel { background-color: #0a0a0c; border-radius: 8px; }");
 
     loadSettings();
 }
@@ -224,7 +244,8 @@ void SettingsDialog::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         // Only start dragging when pressing on the title bar area.
-        if (m_titleBar->geometry().contains(event->pos())) {
+        const QRect titleRect(m_titleBar->mapTo(this, QPoint(0, 0)), m_titleBar->size());
+        if (titleRect.contains(event->pos())) {
             m_dragPos = event->globalPosition().toPoint() - frameGeometry().topLeft();
             event->accept();
             return;
@@ -241,15 +262,4 @@ void SettingsDialog::mouseMoveEvent(QMouseEvent *event)
         return;
     }
     QDialog::mouseMoveEvent(event);
-}
-
-void SettingsDialog::paintEvent(QPaintEvent *event)
-{
-    Q_UNUSED(event);
-    // Rounded corners for the frameless window.
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(10, 10, 12));
-    p.drawRoundedRect(rect(), 8, 8);
 }

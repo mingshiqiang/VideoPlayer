@@ -146,12 +146,23 @@ void TitleBar::mousePressEvent(QMouseEvent *event)
 void TitleBar::mouseMoveEvent(QMouseEvent *event)
 {
     if (event->buttons() & Qt::LeftButton) {
-        QPoint delta = event->globalPosition().toPoint() - m_dragStartPos;
         QWidget *win = window();
-        if (win && !win->isMaximized()) {
+        if (win && win->isMaximized()) {
+            const QPoint globalPos = event->globalPosition().toPoint();
+            const qreal titleXRatio = width() > 0 ? event->position().x() / width() : 0.5;
+
+            win->showNormal();
+            setMaximized(false);
+
+            const int restoredX = globalPos.x() - qRound(win->width() * titleXRatio);
+            const int restoredY = globalPos.y() - qRound(event->position().y());
+            win->move(restoredX, restoredY);
+            m_dragStartPos = globalPos;
+        } else if (win) {
+            QPoint delta = event->globalPosition().toPoint() - m_dragStartPos;
             win->move(win->pos() + delta);
+            m_dragStartPos = event->globalPosition().toPoint();
         }
-        m_dragStartPos = event->globalPosition().toPoint();
         event->accept();
     }
 }

@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include <QApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFile>
@@ -19,11 +20,45 @@
 #include <QDateTime>
 #include <QImageWriter>
 #include <QPainter>
+#include <QCursor>
+
+namespace {
+void enableMouseTrackingForTree(QWidget *widget)
+{
+    if (!widget) return;
+
+    widget->setMouseTracking(true);
+    const auto children = widget->findChildren<QWidget *>();
+    for (QWidget *child : children) {
+        child->setMouseTracking(true);
+    }
+}
+
+Qt::CursorShape cursorForResizeRegion(int region)
+{
+    switch (region) {
+    case 11:
+    case 33:
+        return Qt::SizeFDiagCursor;
+    case 13:
+    case 31:
+        return Qt::SizeBDiagCursor;
+    case 21:
+    case 23:
+        return Qt::SizeHorCursor;
+    case 12:
+    case 32:
+        return Qt::SizeVerCursor;
+    default:
+        return Qt::ArrowCursor;
+    }
+}
+}  // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowFlags(Qt::FramelessWindowHint);
+    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowMinMaxButtonsHint);
     setAttribute(Qt::WA_TranslucentBackground, false);
     setMouseTracking(true);
 
@@ -31,6 +66,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_audioOutput = new AudioOutput(this);
 
     setupUI();
+    enableMouseTrackingForTree(this);
     setupConnections();
     setupShortcuts();
     applyStylesheet();
@@ -65,6 +101,12 @@ MainWindow::MainWindow(QWidget *parent)
     // F, L, arrows, ...) are captured and no child button shows a focus rect.
     setFocusPolicy(Qt::StrongFocus);
     setFocus();
+
+    // The video canvas gets its final layout size after show(); center the
+    // empty-state label once the event loop has applied the startup geometry.
+    QTimer::singleShot(0, this, [this]() {
+        updateEmptyStateGeometry();
+    });
 }
 
 MainWindow::~MainWindow()
@@ -101,6 +143,8 @@ void MainWindow::setupUI()
     m_emptyStateLabel->setObjectName("emptyState");
     m_emptyStateLabel->setAlignment(Qt::AlignCenter);
     m_emptyStateLabel->setMouseTracking(true);
+    m_emptyStateLabel->setText("Drop a video file here, or press Ctrl+O to open\n\n"
+                               "Supported: MP4 / FLV / MKV / AVI / MOV / WEBM / TS");
     m_emptyStateLabel->adjustSize();
 
     m_controlBar = new ControlBar(m_centralWidget);
@@ -378,6 +422,18 @@ void MainWindow::openFile(const QString &path)
     m_playlistWidget->setDurationForCurrent(m_player->duration());
 }
 
+void MainWindow::updateEmptyStateGeometry()
+{
+    if (!m_emptyStateLabel || !m_videoCanvas) {
+        return;
+    }
+
+    m_emptyStateLabel->adjustSize();
+    m_emptyStateLabel->move(
+        (m_videoCanvas->width() - m_emptyStateLabel->width()) / 2,
+        (m_videoCanvas->height() - m_emptyStateLabel->height()) / 2);
+}
+
 void MainWindow::onOpenFile()
 {
     QSettings settings;
@@ -595,6 +651,7 @@ void MainWindow::onFullscreenToggled()
         m_titleBarEffect->setOpacity(1.0);
         setCursor(Qt::ArrowCursor);
     } else {
+        clearResizeCursor();
         showFullScreen();
         m_titleBar->hide();
         m_playlistWidget->hide();
@@ -609,6 +666,7 @@ void MainWindow::onMaximizeClicked()
         showNormal();
         m_titleBar->setMaximized(false);
     } else {
+        clearResizeCursor();
         showMaximized();
         m_titleBar->setMaximized(true);
     }
@@ -694,15 +752,10 @@ void MainWindow::dropEvent(QDropEvent *event)
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
-    if (m_emptyStateLabel) {
-        QString text = "Drop a video file here, or press Ctrl+O to open\n\n"
-                       "Supported: MP4 / FLV / MKV / AVI / MOV / WEBM / TS";
-        m_emptyStateLabel->setText(text);
-        m_emptyStateLabel->adjustSize();
-        m_emptyStateLabel->move(
-            (m_videoCanvas->width() - m_emptyStateLabel->width()) / 2,
-            (m_videoCanvas->height() - m_emptyStateLabel->height()) / 2);
-    }
+    updateEmptyStateGeometry();
+    QTimer::singleShot(0, this, [this]() {
+        updateEmptyStateGeometry();
+    });
 }
 
 // --- Frameless window edge resizing (qtframeless-style 3×3 grid) -----------
@@ -716,12 +769,11 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 // the application level (qApp) so that every MouseMove / MouseButtonPress /
 // MouseButtonRelease reaches us regardless of which child is under the cursor.
 
-static const int kResizeEdge = 6;     // px from border that triggers resize
-static const int kTitleBarHeight = 40; // TitleBar height in pixels
+static const int kResizeEdge = 5; // Same edge width used by qtframeless.
 
 int MainWindow::hitTest(const QPoint &pos) const
 {
-    if (m_isFullscreen) return RegionNone;
+    if (m_isFullscreen || isMaximized()) return RegionNone;
 
     const int w = width();
     const int h = height();
@@ -731,18 +783,19 @@ int MainWindow::hitTest(const QPoint &pos) const
     int rx = 0, ry = 0;  // 1=left/top, 2=middle, 3=right/bottom
 
     // Horizontal zone
-    if (x < kResizeEdge)             rx = 1;
-    else if (x >= w - kResizeEdge)   rx = 3;
-    else                             rx = 2;
+    if (x <= kResizeEdge)           rx = 1;
+    else if (x >= w - kResizeEdge)  rx = 3;
+    else                            rx = 2;
 
     // Vertical zone
-    if (y < kResizeEdge)             ry = 1;
-    else if (y >= h - kResizeEdge)   ry = 3;
-    else                             ry = 2;
+    if (y <= kResizeEdge)           ry = 1;
+    else if (y >= h - kResizeEdge)  ry = 3;
+    else                            ry = 2;
 
     // If the cursor is in the title bar (not on its top edge), it's a drag
     // zone — we let the TitleBar's own mouse handling take care of dragging.
-    if (ry == 2 && y < kTitleBarHeight && rx == 2)
+    const int titleBarHeight = m_titleBar ? m_titleBar->height() : 40;
+    if (ry == 2 && y < titleBarHeight && rx == 2)
         return RegionNone;  // let TitleBar handle dragging
 
     // Center of the window (not near any edge) — not a resize zone.
@@ -754,13 +807,29 @@ int MainWindow::hitTest(const QPoint &pos) const
 
 void MainWindow::updateCursorForRegion(int region)
 {
-    switch (region) {
-    case RegionLeftTop:     case RegionRightBottom: setCursor(Qt::SizeFDiagCursor); break;
-    case RegionRightTop:    case RegionLeftBottom:  setCursor(Qt::SizeBDiagCursor); break;
-    case RegionLeft:        case RegionRight:       setCursor(Qt::SizeHorCursor);   break;
-    case RegionTop:         case RegionBottom:      setCursor(Qt::SizeVerCursor);   break;
-    default:  // RegionNone / RegionCenter — don't override child cursor
-        break;
+    const Qt::CursorShape shape = cursorForResizeRegion(region);
+    if (shape == Qt::ArrowCursor) {
+        clearResizeCursor();
+        return;
+    }
+
+    if (m_resizeCursorOverridden) {
+        QApplication::changeOverrideCursor(QCursor(shape));
+    } else {
+        QApplication::setOverrideCursor(QCursor(shape));
+        m_resizeCursorOverridden = true;
+    }
+    setCursor(shape);
+}
+
+void MainWindow::clearResizeCursor()
+{
+    if (m_resizeCursorOverridden) {
+        QApplication::restoreOverrideCursor();
+        m_resizeCursorOverridden = false;
+    }
+    if (!m_isFullscreen) {
+        unsetCursor();
     }
 }
 
@@ -771,6 +840,8 @@ void MainWindow::startResize(int region, const QPoint &globalPos)
     m_resizeStartGlobal = globalPos;
     m_resizeStartPos = pos();
     m_resizeStartGeo = geometry();
+    updateCursorForRegion(region);
+    grabMouse();
 }
 
 void MainWindow::doResize(const QPoint &globalPos)
@@ -829,8 +900,12 @@ void MainWindow::doResize(const QPoint &globalPos)
 
 void MainWindow::endResize()
 {
+    if (mouseGrabber() == this) {
+        releaseMouse();
+    }
     m_resizing = false;
     m_resizeRegion = RegionNone;
+    clearResizeCursor();
 }
 
 void MainWindow::mousePressEvent(QMouseEvent *event)
@@ -876,7 +951,7 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 void MainWindow::leaveEvent(QEvent *event)
 {
     if (!m_resizing && !m_isFullscreen)
-        setCursor(Qt::ArrowCursor);
+        clearResizeCursor();
     QMainWindow::leaveEvent(event);
 }
 
@@ -885,6 +960,11 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
     // Intercept mouse events from child widgets so that edge resize works
     // even when the cursor is over a child (video canvas, control bar, etc.).
     if (!m_isFullscreen && event->isInputEvent()) {
+        QWidget *src = qobject_cast<QWidget *>(obj);
+        if (!src || src->window() != this) {
+            return QMainWindow::eventFilter(obj, event);
+        }
+
         switch (event->type()) {
         case QEvent::MouseMove: {
             auto *me = static_cast<QMouseEvent *>(event);
@@ -893,9 +973,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
                 return true;
             }
             // Map the event position from the child to the main window.
-            QWidget *src = qobject_cast<QWidget *>(obj);
-            QPoint localPos = (src && src != this) ? mapFromGlobal(me->globalPosition().toPoint())
-                                                   : me->pos();
+            QPoint localPos = mapFromGlobal(me->globalPosition().toPoint());
             int region = hitTest(localPos);
             updateCursorForRegion(region);
             break;
@@ -903,9 +981,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         case QEvent::MouseButtonPress: {
             auto *me = static_cast<QMouseEvent *>(event);
             if (me->button() == Qt::LeftButton) {
-                QWidget *src = qobject_cast<QWidget *>(obj);
-                QPoint localPos = (src && src != this) ? mapFromGlobal(me->globalPosition().toPoint())
-                                                       : me->pos();
+                QPoint localPos = mapFromGlobal(me->globalPosition().toPoint());
                 int region = hitTest(localPos);
                 if (region != RegionNone) {
                     startResize(region, me->globalPosition().toPoint());

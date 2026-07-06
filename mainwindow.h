@@ -72,6 +72,7 @@ private:
     void setupShortcuts();
     void applyStylesheet();
     void openFile(const QString &path);
+    void updateEmptyStateGeometry();
 
     FFmpegPlayer *m_player;
     AudioOutput *m_audioOutput;
@@ -107,11 +108,13 @@ private:
     };
     int hitTest(const QPoint &pos) const;         // returns a ResizeRegion
     void updateCursorForRegion(int region);
+    void clearResizeCursor();
     void startResize(int region, const QPoint &globalPos);
     void doResize(const QPoint &globalPos);
     void endResize();
 
     bool m_resizing = false;
+    bool m_resizeCursorOverridden = false;
     int m_resizeRegion = RegionNone;
     QPoint m_resizeStartGlobal;
     QPoint m_resizeStartPos;
